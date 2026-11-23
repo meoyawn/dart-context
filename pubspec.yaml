@@ -1,6 +1,6 @@
 name: context
 description: Go-style cancellation contexts, injectable clocks and bounded task pools for Dart.
-version: 0.1.0
+version: 0.2.0
 repository: https://github.com/meoyawn/dart-context
 environment:
   sdk: ^3.14.0

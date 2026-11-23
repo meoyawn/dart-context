@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:context/context.dart';
 import 'package:test/test.dart';
 
@@ -60,7 +62,7 @@ void main() {
   });
 
   test('pool bounds concurrency and rethrows the first failure after all tasks', () async {
-    final pool = Pool(2);
+    final pool = Pool(limit: 2);
     var active = 0, peak = 0, finished = 0;
     for (var i = 0; i < 6; i++) {
       pool.run(() async {
@@ -75,5 +77,59 @@ void main() {
     await expectLater(pool.wait(), throwsA(isA<StateError>()));
     expect(peak, 2);
     expect(finished, 6);
+  });
+
+  test('a failure cancels the pool context with that failure as cause', () async {
+    final parent = Context.background.child();
+    final (pool, context) = Pool.withContext(parent, limit: 2);
+    final failure = StateError('boom');
+    Object? siblingSaw;
+    var queuedStarted = false;
+
+    pool.run(() async {
+      try {
+        await context.guard(Completer<void>().future);
+      } on Object catch (cause) {
+        siblingSaw = cause;
+        rethrow;
+      }
+    });
+    pool.run(() async => throw failure);
+    pool.run(() async => queuedStarted = true);
+
+    await expectLater(pool.wait(), throwsA(same(failure)));
+    expect(siblingSaw, same(failure));
+    expect(context.cause, same(failure));
+    expect(queuedStarted, isFalse);
+    expect(parent.isCancelled, isFalse);
+  });
+
+  test('queued tasks never start after the parent is cancelled', () async {
+    final parent = Context.background.child();
+    final (pool, _) = Pool.withContext(parent, limit: 1);
+    final release = Completer<void>();
+    var queuedStarted = false;
+
+    pool.run(() => release.future);
+    pool.run(() async => queuedStarted = true);
+    parent.cancel(const Cancelled('shutdown'));
+    release.complete();
+
+    await expectLater(
+      pool.wait(),
+      throwsA(isA<Cancelled>().having((c) => c.reason, 'reason', 'shutdown')),
+    );
+    expect(queuedStarted, isFalse);
+  });
+
+  test('wait cancels the pool context after every task succeeds', () async {
+    final (pool, context) = Pool.withContext(Context.background);
+    var ran = 0;
+    for (var i = 0; i < 3; i++) {
+      pool.run(() async => ran++);
+    }
+    await pool.wait();
+    expect(ran, 3);
+    expect(context.cause, isA<Cancelled>());
   });
 }

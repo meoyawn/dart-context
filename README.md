@@ -22,11 +22,13 @@ Future<void> main() async {
   ctx.cancel(const Cancelled('shutting down'));
   await body.catchError((Object _) => '');
 
-  // Pool runs at most N tasks at once; wait() rethrows the first failure
-  // after every task has finished.
-  final pool = Pool(4);
+  // Like errgroup.WithContext: at most 4 tasks run at once, the first failure
+  // cancels `group` (with that failure as its cause), queued tasks never start
+  // after it is cancelled, and wait() rethrows the first failure once every
+  // started task has finished.
+  final (pool, group) = Pool.withContext(Context.background, limit: 4);
   for (final url in ['a', 'b', 'c']) {
-    pool.run(() => download(url));
+    pool.run(() => download(group, url));
   }
   await pool.wait();
 }
@@ -40,7 +42,8 @@ Future<void> main() async {
 | `context.AfterFunc`         | `ctx.onCancel(callback)`     |
 | `ctx.Done()` / `Cause(ctx)` | `ctx.done` / `ctx.cause`     |
 | `clockwork.Clock`           | `Clock`, `SystemClock`, `FakeClock` |
-| `errgroup.Group.SetLimit`   | `Pool(limit)`                |
+| `errgroup.WithContext`      | `Pool.withContext(ctx)`      |
+| `errgroup.Group.SetLimit`   | `Pool(limit: n)`             |
 
 `FakeClock` moves only when you call `advance`, and `blockUntilTimer()` lets a
 test wait until the code under test has started a timer.
